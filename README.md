@@ -4,17 +4,29 @@
 
 画像は端末内だけで処理され、サーバーには送信されません。
 
-## Recommended Repository Name
+## Repository Name and Public Address
 
-おすすめは `any-face-dice` です。
+GitHub repository name:
+
+```text
+any-face-dice
+```
+
+Published GitHub Pages base path:
+
+```text
+/😃🎲/
+```
+
+この違いは意図的です。
 
 理由:
 
-- GitHub PagesのURLが扱いやすい
 - npm / Vite / CLI / shellでトラブルが少ない
 - アプリ名 `AnyFaceDice` と対応が分かりやすい
+- 公開アドレスにはemoji identityを残せる
 
-emojiの雰囲気は、リポジトリ説明やREADME、ページ内タイトルで出すのがおすすめです。
+このルールは [AGENTS.md](./AGENTS.md) にも記録しています。
 
 ## Development
 
@@ -31,16 +43,10 @@ npm run build
 
 ## GitHub Pages
 
-現在のVite baseは既定で `/😃🎲/` です。
-
-`any-face-dice` というリポジトリで公開する場合は、`vite.config.ts` のbaseを次のように変更してください。
+Vite baseは既定で `/😃🎲/` です。
 
 ```ts
-base: process.env.VITE_BASE_PATH ?? "/any-face-dice/",
+base: process.env.VITE_BASE_PATH ?? "/😃🎲/",
 ```
 
-またはビルド時に環境変数で指定できます。
-
-```bash
-VITE_BASE_PATH=/any-face-dice/ npm run build
-```
+リポジトリ名が `any-face-dice` でも、公開アドレスのbase pathは `/😃🎲/` のままです。ユーザーが明示的に公開アドレス変更を求めない限り、このbaseを変更しないでください。
