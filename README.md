@@ -41,6 +41,13 @@ npm run dev
 npm run build
 ```
 
+## Preview Built Site
+
+```bash
+npm run build
+npm run preview
+```
+
 ## GitHub Pages
 
 Vite baseは既定で `/😃🎲/` です。
@@ -50,3 +57,17 @@ base: process.env.VITE_BASE_PATH ?? "/😃🎲/",
 ```
 
 リポジトリ名が `any-face-dice` でも、公開アドレスのbase pathは `/😃🎲/` のままです。ユーザーが明示的に公開アドレス変更を求めない限り、このbaseを変更しないでください。
+
+デプロイ直前の確認:
+
+```bash
+npm run build
+```
+
+実際に公開する時:
+
+```bash
+npm run deploy
+```
+
+`npm run deploy` は `dist` を `gh-pages` ブランチへ送ります。公開先のPages設定はGitHub側で `gh-pages` ブランチを参照するように設定してください。
