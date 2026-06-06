@@ -64,6 +64,12 @@ function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
   });
 }
 
+function releasePhotoUrl(photo: PhotoEntry) {
+  if (!photo.isDemo) {
+    URL.revokeObjectURL(photo.url);
+  }
+}
+
 function getScore(detection: Detection) {
   return detection.categories?.[0]?.score ?? 0;
 }
@@ -267,8 +273,9 @@ function App() {
       return detectorRef.current;
     }
 
-    if (!detectorPromiseRef.current) {
-      detectorPromiseRef.current = (async () => {
+    const detectorPromise =
+      detectorPromiseRef.current ??
+      (async () => {
         setDetectorState("loading");
         const vision = await FilesetResolver.forVisionTasks(WASM_URL);
         const detector = await FaceDetector.createFromOptions(vision, {
@@ -282,13 +289,23 @@ function App() {
         detectorRef.current = detector;
         return detector;
       })();
-    }
 
-    return detectorPromiseRef.current;
+    detectorPromiseRef.current = detectorPromise;
+
+    try {
+      return await detectorPromise;
+    } catch (error) {
+      if (detectorPromiseRef.current === detectorPromise) {
+        detectorPromiseRef.current = null;
+      }
+      throw error;
+    }
   }, []);
 
   const addPhoto = useCallback(
     async (blob: Blob) => {
+      let loaded: Awaited<ReturnType<typeof loadImageFromBlob>> | null = null;
+
       setMessage("顔を探しています...");
       setDetectorState("detecting");
       setGameState("waiting");
@@ -297,10 +314,11 @@ function App() {
 
       try {
         const detector = await loadDetector();
-        const loaded = await loadImageFromBlob(blob);
+        const loadedPhoto = await loadImageFromBlob(blob);
+        loaded = loadedPhoto;
         const imageId = `photo-${photoIdRef.current}`;
         photoIdRef.current += 1;
-        const result = detector.detect(loaded.image);
+        const result = detector.detect(loadedPhoto.image);
         const detected = result.detections
           .map((detection, index): FaceCandidate | null => {
             if (!detection.boundingBox) {
@@ -310,7 +328,7 @@ function App() {
             return {
               id: `${imageId}-face-${index}`,
               imageId,
-              image: loaded.image,
+              image: loadedPhoto.image,
               box: {
                 originX: detection.boundingBox.originX,
                 originY: detection.boundingBox.originY,
@@ -322,29 +340,34 @@ function App() {
           })
           .filter((face): face is FaceCandidate => Boolean(face));
 
-        setPhotos((current) => [
-          ...current,
+        const nextPhotos = [
+          ...photosRef.current,
           {
             id: imageId,
-            url: loaded.url,
-            image: loaded.image,
+            url: loadedPhoto.url,
+            image: loadedPhoto.image,
             faces: detected,
           },
-        ]);
+        ];
+        photosRef.current = nextPhotos;
+        setPhotos(nextPhotos);
 
         setDetectorState("ready");
-        setGameState(detected.length > 0 || faces.length > 0 ? "ready" : "waiting");
+        setGameState(nextPhotos.some((photo) => photo.faces.length > 0) ? "ready" : "waiting");
         setMessage(
           detected.length > 0
             ? `${detected.length}人見つけた！準備OK。`
             : "顔が見つからなかった。もう1枚いこう。",
         );
       } catch {
+        if (loaded) {
+          URL.revokeObjectURL(loaded.url);
+        }
         setDetectorState("error");
         setMessage("顔検出の読み込みに失敗しました。通信状態を確認してもう一度。");
       }
     },
-    [faces.length, loadDetector],
+    [loadDetector],
   );
 
   const onFileSelect = useCallback(
@@ -399,7 +422,8 @@ function App() {
       spinTimerRef.current = null;
     }
 
-    photos.forEach((photo) => URL.revokeObjectURL(photo.url));
+    photos.forEach(releasePhotoUrl);
+    photosRef.current = [];
     setPhotos([]);
     setActiveIndex(null);
     setWinnerIndex(null);
@@ -413,7 +437,8 @@ function App() {
       spinTimerRef.current = null;
     }
 
-    photos.forEach((photo) => URL.revokeObjectURL(photo.url));
+    photos.forEach(releasePhotoUrl);
+    photosRef.current = [];
     setMessage("デモモードを準備中...");
     setDetectorState("ready");
     setGameState("waiting");
@@ -431,7 +456,7 @@ function App() {
         score: 1,
       }));
 
-      setPhotos([
+      const demoPhotos = [
         {
           id: imageId,
           url: DEMO_IMAGE_URL,
@@ -439,7 +464,9 @@ function App() {
           faces: demoFaces,
           isDemo: true,
         },
-      ]);
+      ];
+      photosRef.current = demoPhotos;
+      setPhotos(demoPhotos);
       setGameState("ready");
       setMessage("デモ5人で遊べます。STARTを押してね！");
     } catch {
@@ -458,7 +485,7 @@ function App() {
       if (spinTimerRef.current !== null) {
         window.clearInterval(spinTimerRef.current);
       }
-      photosRef.current.forEach((photo) => URL.revokeObjectURL(photo.url));
+      photosRef.current.forEach(releasePhotoUrl);
     },
     [],
   );

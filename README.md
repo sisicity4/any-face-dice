@@ -71,3 +71,13 @@ npm run deploy
 ```
 
 `npm run deploy` は `dist` を `gh-pages` ブランチへ送ります。公開先のPages設定はGitHub側で `gh-pages` ブランチを参照するように設定してください。
+
+## Vercel
+
+VercelではルートURLから配信するため、`vercel.json`のビルドコマンドで
+`VITE_BASE_PATH=/`を指定しています。Viteの既定値とGitHub Pages向け公開パスは、
+意図どおり `/😃🎲/` のまま維持しています。
+
+```bash
+vercel deploy
+```
