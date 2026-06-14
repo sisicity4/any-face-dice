@@ -1,8 +1,26 @@
 import { useEffect, useRef } from "react";
+import { cropFaceToCanvas, type FaceCandidate } from "./face";
 
 export type DicePhase = "idle" | "rolling" | "result";
 
 const FACES = ["front", "back", "right", "left", "top", "bottom"] as const;
+const FACE_TEX = 128;
+
+// 1 つの面。顔があればクロップ写真、なければ数値を表示する。
+function DiceFace({ face, value }: { face: FaceCandidate | null; value: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (face && canvasRef.current) {
+      cropFaceToCanvas(canvasRef.current, face, FACE_TEX);
+    }
+  }, [face]);
+
+  if (face) {
+    return <canvas ref={canvasRef} className="dice-photo" />;
+  }
+  return <span className="dice-num">{value}</span>;
+}
 
 // 静止時の 3/4 ビュー。
 const REST_X = -24;
@@ -20,7 +38,15 @@ const forwardRest = (from: number, base: number) => from + wrap360(base - from) 
 
 // Design.md に合わせたマシン加工風モノクロの立方体。
 // RUN 中は requestAnimationFrame で多軸タンブル、STOP で静止姿勢へ減速してロックする。
-export function Dice3D({ value, phase }: { value: string; phase: DicePhase }) {
+export function Dice3D({
+  value,
+  phase,
+  face,
+}: {
+  value: string;
+  phase: DicePhase;
+  face: FaceCandidate | null;
+}) {
   const cubeRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const rot = useRef({ x: REST_X, y: REST_Y });
@@ -105,9 +131,9 @@ export function Dice3D({ value, phase }: { value: string; phase: DicePhase }) {
   return (
     <div className={`dice3d phase-${phase}`} aria-hidden="true">
       <div className="dice-cube" ref={cubeRef}>
-        {FACES.map((face) => (
-          <span key={face} className={`dice-face f-${face}`}>
-            {value}
+        {FACES.map((side) => (
+          <span key={side} className={`dice-face f-${side}`}>
+            <DiceFace face={face} value={value} />
           </span>
         ))}
       </div>

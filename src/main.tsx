@@ -2,22 +2,8 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "r
 import { createRoot } from "react-dom/client";
 import { FaceDetector, FilesetResolver, type Detection } from "@mediapipe/tasks-vision";
 import { Dice3D, type DicePhase } from "./Dice3D";
+import { cropFaceToCanvas, type FaceBox, type FaceCandidate } from "./face";
 import "./styles.css";
-
-type FaceBox = {
-  originX: number;
-  originY: number;
-  width: number;
-  height: number;
-};
-
-type FaceCandidate = {
-  id: string;
-  imageId: string;
-  image: HTMLImageElement;
-  box: FaceBox;
-  score: number;
-};
 
 type PhotoEntry = {
   id: string;
@@ -91,29 +77,6 @@ function getDiceLabel(count: number) {
 
 function pad2(value: number) {
   return String(value).padStart(2, "0");
-}
-
-function cropFaceToCanvas(
-  canvas: HTMLCanvasElement,
-  face: FaceCandidate,
-  size: number,
-  paddingRatio = 0.42,
-) {
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return;
-  }
-
-  const padding = Math.max(face.box.width, face.box.height) * paddingRatio;
-  const x = Math.max(0, face.box.originX - padding);
-  const y = Math.max(0, face.box.originY - padding);
-  const right = Math.min(face.image.naturalWidth, face.box.originX + face.box.width + padding);
-  const bottom = Math.min(face.image.naturalHeight, face.box.originY + face.box.height + padding);
-
-  canvas.width = size;
-  canvas.height = size;
-  context.clearRect(0, 0, size, size);
-  context.drawImage(face.image, x, y, right - x, bottom - y, 0, 0, size, size);
 }
 
 function FaceTile({
@@ -322,6 +285,10 @@ function App() {
         : "00";
   const dicePhase: DicePhase =
     gameState === "rolling" ? "rolling" : gameState === "result" ? "result" : "idle";
+  const diceFace =
+    activeIndex !== null && (gameState === "rolling" || gameState === "result")
+      ? (faces[activeIndex] ?? null)
+      : null;
 
   const loadDetector = useCallback(async () => {
     if (detectorRef.current) {
@@ -633,7 +600,7 @@ function App() {
                 aria-live="polite"
                 aria-label={`選択 ${readoutValue} / ${pad2(faces.length)}`}
               >
-                <Dice3D value={readoutValue} phase={dicePhase} />
+                <Dice3D value={readoutValue} phase={dicePhase} face={diceFace} />
                 <span className="readout-unit">/ {pad2(faces.length)}</span>
               </div>
 
