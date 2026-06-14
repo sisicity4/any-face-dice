@@ -74,10 +74,15 @@ npm run deploy
 
 ## Vercel
 
-VercelではルートURLから配信するため、`vercel.json`のビルドコマンドで
-`VITE_BASE_PATH=/`を指定しています。Viteの既定値とGitHub Pages向け公開パスは、
-意図どおり `/😃🎲/` のまま維持しています。
+公開アドレスにemoji identityを残すため、Vercelでも `/😃🎲/` パスで配信します。
+リポジトリ名は `any-face-dice` のままですが、公開パスは意図どおり `/😃🎲/` です。
+
+`vercel.json` のビルドコマンドで base を `/😃🎲/`、出力先を `dist/😃🎲/` に指定し、
+`dist` を配信ルートにすることで `https://<project>.vercel.app/😃🎲/` で開けます。
+ルート `/` は `/😃🎲/` へリダイレクトします。
 
 ```bash
-vercel deploy
+vercel deploy --prod
 ```
+
+公開URL: `https://any-face-dice.vercel.app/😃🎲/`
