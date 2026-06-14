@@ -84,11 +84,13 @@ function FaceTile({
   index,
   active,
   winner,
+  onRemove,
 }: {
   face: FaceCandidate;
   index: number;
   active: boolean;
   winner: boolean;
+  onRemove?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -99,13 +101,23 @@ function FaceTile({
   }, [face]);
 
   return (
-    <div
-      className={`tile ${active ? "is-active" : ""} ${winner ? "is-winner" : ""}`}
-      role="img"
-      aria-label={`参加者 ${index + 1}${winner ? " · 当選" : active ? " · 選択中" : ""}`}
-    >
-      <canvas ref={canvasRef} />
+    <div className={`tile ${active ? "is-active" : ""} ${winner ? "is-winner" : ""}`}>
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label={`参加者 ${index + 1}${winner ? " · 当選" : active ? " · 選択中" : ""}`}
+      />
       <span className="tile-no">{pad2(index + 1)}</span>
+      {onRemove ? (
+        <button
+          className="tile-del"
+          type="button"
+          onClick={onRemove}
+          aria-label={`参加者 ${index + 1} を削除`}
+        >
+          ×
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -476,6 +488,44 @@ function App() {
     setMessage("待機中 — 顔を取り込んでください");
   }, [photos]);
 
+  const removeFace = useCallback((faceId: string) => {
+    const exists = photosRef.current.some((photo) =>
+      photo.faces.some((face) => face.id === faceId),
+    );
+    if (!exists) {
+      return;
+    }
+
+    // 抽選中は番号がずれるので止める。
+    if (spinTimerRef.current !== null) {
+      window.clearInterval(spinTimerRef.current);
+      spinTimerRef.current = null;
+    }
+    opGenRef.current += 1;
+
+    const nextPhotos: PhotoEntry[] = [];
+    for (const photo of photosRef.current) {
+      const faces = photo.faces.filter((face) => face.id !== faceId);
+      if (faces.length === 0) {
+        // 顔が無くなった写真は破棄（メモリ解放）。
+        releasePhotoUrl(photo);
+        continue;
+      }
+      nextPhotos.push(faces.length === photo.faces.length ? photo : { ...photo, faces });
+    }
+
+    photosRef.current = nextPhotos;
+    setPhotos(nextPhotos);
+    setActiveIndex(null);
+    setWinnerIndex(null);
+
+    const total = nextPhotos.reduce((sum, photo) => sum + photo.faces.length, 0);
+    setGameState(total > 0 ? "ready" : "waiting");
+    setMessage(
+      total > 0 ? `${total} 件 — RUN で実行` : "待機中 — 顔を取り込んでください",
+    );
+  }, []);
+
   const startDemoMode = useCallback(async () => {
     opGenRef.current += 1;
     if (spinTimerRef.current !== null) {
@@ -669,6 +719,9 @@ function App() {
                   index={index}
                   active={index === activeIndex}
                   winner={index === winnerIndex}
+                  onRemove={
+                    gameState === "rolling" || busy ? undefined : () => removeFace(face.id)
+                  }
                 />
               ))}
             </div>
