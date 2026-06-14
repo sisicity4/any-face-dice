@@ -33,6 +33,8 @@ const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/w
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite";
 const DEMO_IMAGE_URL = `${import.meta.env.BASE_URL}demo-party.svg`;
+const MIN_FACE_SCORE = 0.5;
+const MIN_FACE_SIZE = 28;
 const DEMO_FACE_BOXES: FaceBox[] = [
   { originX: 88, originY: 96, width: 354, height: 372 },
   { originX: 438, originY: 388, width: 294, height: 302 },
@@ -86,6 +88,10 @@ function getDiceLabel(count: number) {
   return `D${count}`;
 }
 
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
 function cropFaceToCanvas(
   canvas: HTMLCanvasElement,
   face: FaceCandidate,
@@ -109,7 +115,7 @@ function cropFaceToCanvas(
   context.drawImage(face.image, x, y, right - x, bottom - y, 0, 0, size, size);
 }
 
-function FaceChip({
+function FaceTile({
   face,
   index,
   active,
@@ -124,14 +130,18 @@ function FaceChip({
 
   useEffect(() => {
     if (canvasRef.current) {
-      cropFaceToCanvas(canvasRef.current, face, 96);
+      cropFaceToCanvas(canvasRef.current, face, 120);
     }
   }, [face]);
 
   return (
-    <div className={`face-chip ${active ? "is-active" : ""} ${winner ? "is-winner" : ""}`}>
+    <div
+      className={`tile ${active ? "is-active" : ""} ${winner ? "is-winner" : ""}`}
+      role="img"
+      aria-label={`参加者 ${index + 1}${winner ? " · 当選" : active ? " · 選択中" : ""}`}
+    >
       <canvas ref={canvasRef} />
-      <span>{index + 1}</span>
+      <span className="tile-no">{pad2(index + 1)}</span>
     </div>
   );
 }
@@ -141,11 +151,11 @@ function ResultFace({ face }: { face: FaceCandidate }) {
 
   useEffect(() => {
     if (canvasRef.current) {
-      cropFaceToCanvas(canvasRef.current, face, 260, 0.5);
+      cropFaceToCanvas(canvasRef.current, face, 220, 0.5);
     }
   }, [face]);
 
-  return <canvas ref={canvasRef} className="winner-face" aria-label="選ばれた顔" />;
+  return <canvas ref={canvasRef} className="locked-face" aria-label="選ばれた顔" />;
 }
 
 function CameraPanel({
@@ -157,10 +167,12 @@ function CameraPanel({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cancelledRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
 
   const stopCamera = useCallback(() => {
+    cancelledRef.current = true;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setOpen(false);
@@ -172,6 +184,7 @@ function CameraPanel({
       return;
     }
 
+    cancelledRef.current = false;
     setOpen(true);
     setError("");
 
@@ -184,6 +197,11 @@ function CameraPanel({
           height: { ideal: 960 },
         },
       });
+      // 許可待ちの間に閉じた / アンマウントされた場合は、解決したストリームを破棄する。
+      if (cancelledRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -225,25 +243,28 @@ function CameraPanel({
 
   useEffect(() => stopCamera, [stopCamera]);
 
+  if (!open) {
+    return (
+      <button className="ctl" type="button" disabled={disabled} onClick={startCamera}>
+        <span className="ctl-key">CAM</span>
+        <span className="ctl-label">カメラで撮る</span>
+      </button>
+    );
+  }
+
   return (
     <div className="camera-box">
-      {!open ? (
-        <button className="big-button blue" type="button" disabled={disabled} onClick={startCamera}>
-          カメラで撮る
+      <video ref={videoRef} className="camera-view" playsInline muted autoPlay />
+      <div className="camera-actions">
+        <button className="ctl" type="button" disabled={disabled} onClick={capture}>
+          <span className="ctl-key">ADD</span>
+          <span className="ctl-label">取り込む</span>
         </button>
-      ) : (
-        <>
-          <video ref={videoRef} className="camera-view" playsInline muted autoPlay />
-          <div className="camera-actions">
-            <button className="big-button yellow" type="button" disabled={disabled} onClick={capture}>
-              この顔を追加
-            </button>
-            <button className="big-button ghost" type="button" onClick={stopCamera}>
-              とじる
-            </button>
-          </div>
-        </>
-      )}
+        <button className="ctl ghost" type="button" onClick={stopCamera}>
+          <span className="ctl-key">ESC</span>
+          <span className="ctl-label">閉じる</span>
+        </button>
+      </div>
       {error ? <p className="inline-error">{error}</p> : null}
     </div>
   );
@@ -255,18 +276,49 @@ function App() {
   const detectorPromiseRef = useRef<Promise<FaceDetector> | null>(null);
   const spinTimerRef = useRef<number | null>(null);
   const photoIdRef = useRef(0);
+  const opGenRef = useRef(0);
   const photosRef = useRef<PhotoEntry[]>([]);
   const [photos, setPhotos] = useState<PhotoEntry[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [winnerIndex, setWinnerIndex] = useState<number | null>(null);
   const [detectorState, setDetectorState] = useState<DetectorState>("idle");
   const [gameState, setGameState] = useState<GameState>("waiting");
-  const [message, setMessage] = useState("まずは顔を撮るか、写真を選んでね。");
+  const [message, setMessage] = useState("待機中 — 顔を取り込んでください");
 
   const faces = useMemo(() => photos.flatMap((photo) => photo.faces), [photos]);
   const winner = winnerIndex === null ? null : faces[winnerIndex] ?? null;
   const diceLabel = getDiceLabel(faces.length);
   const busy = detectorState === "loading" || detectorState === "detecting";
+
+  const statusLabel = busy
+    ? "SCAN"
+    : detectorState === "error"
+      ? "ERR"
+      : gameState === "rolling"
+        ? "RUN"
+        : gameState === "result"
+          ? "LOCK"
+          : faces.length > 0
+            ? "READY"
+            : "IDLE";
+  const signalKind = busy
+    ? "scan"
+    : detectorState === "error"
+      ? "err"
+      : gameState === "rolling"
+        ? "run"
+        : gameState === "result"
+          ? "lock"
+          : faces.length > 0
+            ? "ready"
+            : "idle";
+
+  const readoutValue =
+    gameState === "rolling" && activeIndex !== null
+      ? pad2(activeIndex + 1)
+      : gameState === "result" && winnerIndex !== null
+        ? pad2(winnerIndex + 1)
+        : "00";
 
   const loadDetector = useCallback(async () => {
     if (detectorRef.current) {
@@ -305,8 +357,10 @@ function App() {
   const addPhoto = useCallback(
     async (blob: Blob) => {
       let loaded: Awaited<ReturnType<typeof loadImageFromBlob>> | null = null;
+      const gen = (opGenRef.current += 1);
+      const isStale = () => opGenRef.current !== gen;
 
-      setMessage("顔を探しています...");
+      setMessage("検出中…");
       setDetectorState("detecting");
       setGameState("waiting");
       setWinnerIndex(null);
@@ -316,12 +370,27 @@ function App() {
         const detector = await loadDetector();
         const loadedPhoto = await loadImageFromBlob(blob);
         loaded = loadedPhoto;
+
+        // 検出中に CLEAR / デモ開始など別操作が走ったら、この結果は破棄する。
+        if (isStale()) {
+          URL.revokeObjectURL(loadedPhoto.url);
+          return;
+        }
         const imageId = `photo-${photoIdRef.current}`;
         photoIdRef.current += 1;
         const result = detector.detect(loadedPhoto.image);
         const detected = result.detections
           .map((detection, index): FaceCandidate | null => {
-            if (!detection.boundingBox) {
+            const box = detection.boundingBox;
+            if (!box) {
+              return null;
+            }
+
+            // 誤検出・極小ボックスを抽選対象から除外する。
+            if (getScore(detection) < MIN_FACE_SCORE) {
+              return null;
+            }
+            if (box.width < MIN_FACE_SIZE || box.height < MIN_FACE_SIZE) {
               return null;
             }
 
@@ -330,15 +399,20 @@ function App() {
               imageId,
               image: loadedPhoto.image,
               box: {
-                originX: detection.boundingBox.originX,
-                originY: detection.boundingBox.originY,
-                width: detection.boundingBox.width,
-                height: detection.boundingBox.height,
+                originX: box.originX,
+                originY: box.originY,
+                width: box.width,
+                height: box.height,
               },
               score: getScore(detection),
             };
           })
           .filter((face): face is FaceCandidate => Boolean(face));
+
+        if (isStale()) {
+          URL.revokeObjectURL(loadedPhoto.url);
+          return;
+        }
 
         const nextPhotos = [
           ...photosRef.current,
@@ -356,15 +430,15 @@ function App() {
         setGameState(nextPhotos.some((photo) => photo.faces.length > 0) ? "ready" : "waiting");
         setMessage(
           detected.length > 0
-            ? `${detected.length}人見つけた！準備OK。`
-            : "顔が見つからなかった。もう1枚いこう。",
+            ? `${detected.length} 件検出 — RUN で実行`
+            : "検出なし — 別の画像を試してください",
         );
       } catch {
         if (loaded) {
           URL.revokeObjectURL(loaded.url);
         }
         setDetectorState("error");
-        setMessage("顔検出の読み込みに失敗しました。通信状態を確認してもう一度。");
+        setMessage("検出モジュールの読み込みに失敗しました");
       }
     },
     [loadDetector],
@@ -390,13 +464,13 @@ function App() {
 
     setWinnerIndex(null);
     setGameState("rolling");
-    setMessage("まわってます。止めて！");
+    setMessage("実行中 — STOP で確定");
     spinTimerRef.current = window.setInterval(() => {
       setActiveIndex((current) => {
         const next = current === null ? 0 : current + 1;
         return next % faces.length;
       });
-    }, 90);
+    }, 70);
   }, [faces.length, gameState]);
 
   const stopRoll = useCallback(() => {
@@ -413,10 +487,11 @@ function App() {
     setActiveIndex(nextWinner);
     setWinnerIndex(nextWinner);
     setGameState("result");
-    setMessage("この人！乾杯！");
+    setMessage(`確定 — No.${pad2(nextWinner + 1)}`);
   }, [faces.length]);
 
   const resetGame = useCallback(() => {
+    opGenRef.current += 1;
     if (spinTimerRef.current !== null) {
       window.clearInterval(spinTimerRef.current);
       spinTimerRef.current = null;
@@ -428,10 +503,11 @@ function App() {
     setActiveIndex(null);
     setWinnerIndex(null);
     setGameState("waiting");
-    setMessage("まずは顔を撮るか、写真を選んでね。");
+    setMessage("待機中 — 顔を取り込んでください");
   }, [photos]);
 
   const startDemoMode = useCallback(async () => {
+    opGenRef.current += 1;
     if (spinTimerRef.current !== null) {
       window.clearInterval(spinTimerRef.current);
       spinTimerRef.current = null;
@@ -439,7 +515,7 @@ function App() {
 
     photos.forEach(releasePhotoUrl);
     photosRef.current = [];
-    setMessage("デモモードを準備中...");
+    setMessage("デモを準備中…");
     setDetectorState("ready");
     setGameState("waiting");
     setActiveIndex(null);
@@ -468,11 +544,11 @@ function App() {
       photosRef.current = demoPhotos;
       setPhotos(demoPhotos);
       setGameState("ready");
-      setMessage("デモ5人で遊べます。STARTを押してね！");
+      setMessage("デモ 5 件 — RUN で実行");
     } catch {
       setDetectorState("error");
       setGameState("waiting");
-      setMessage("デモ画像を読み込めませんでした。");
+      setMessage("デモ画像を読み込めませんでした");
     }
   }, [photos]);
 
@@ -486,102 +562,138 @@ function App() {
         window.clearInterval(spinTimerRef.current);
       }
       photosRef.current.forEach(releasePhotoUrl);
+      detectorRef.current?.close();
+      detectorRef.current = null;
+      detectorPromiseRef.current = null;
     },
     [],
   );
 
   return (
     <main className={`app state-${gameState}`}>
-      <section className="game-shell">
-        <header className="hero">
-          <p className="eyebrow">😃🎲 Face Dice Party</p>
-          <h1>AnyFaceDice</h1>
-          <p className="lead">顔を撮って、ボタンを押して、選ばれた人で盛り上がるだけ。</p>
-          <p className="privacy">画像は端末内だけで処理。サーバーには送りません。</p>
+      <div className="console">
+        <header className="bar">
+          <div className="brand">
+            <h1 className="mark">AnyFaceDice</h1>
+            <span className="sub">FACE SELECTOR / RANDOM</span>
+          </div>
+          <div className={`signal kind-${signalKind}`}>
+            <span className="led" aria-hidden="true" />
+            <span className="signal-text">{statusLabel}</span>
+          </div>
         </header>
 
-        <section className="status-board" aria-label="現在の状態">
-          <div>
-            <span>人数</span>
-            <strong>{faces.length}</strong>
-          </div>
-          <div>
-            <span>サイコロ</span>
-            <strong>{diceLabel}</strong>
-          </div>
-          <div>
-            <span>状態</span>
-            <strong>{gameState === "rolling" ? "GO" : gameState === "result" ? "HIT" : "OK"}</strong>
-          </div>
-        </section>
-
-        <p className="party-message" role="status">
-          {message}
-        </p>
-
-        <section className="input-zone" aria-label="顔を追加">
-          <CameraPanel disabled={busy || gameState === "rolling"} onCapture={addPhoto} />
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={(event) => onFileSelect(event.target.files)}
-          />
-          <button
-            className="big-button pink"
-            type="button"
-            disabled={busy || gameState === "rolling"}
-            onClick={() => inputRef.current?.click()}
-          >
-            写真を選ぶ
-          </button>
-          <button
-            className="big-button demo"
-            type="button"
-            disabled={busy || gameState === "rolling"}
-            onClick={startDemoMode}
-          >
-            デモで遊ぶ
-          </button>
-        </section>
-
-        <section className="dice-zone" aria-label="サイコロ">
-          <div className={`dice-face ${gameState === "rolling" ? "rolling" : ""}`}>
-            <span>{diceLabel}</span>
-            <small>{faces.length > 0 ? `${faces.length}人で抽選` : "顔待ち"}</small>
-          </div>
-          <div className="play-buttons">
-            <button
-              className="mega-button start"
-              type="button"
-              disabled={faces.length === 0 || busy || gameState === "rolling"}
-              onClick={startRoll}
-            >
-              START
-            </button>
-            <button
-              className="mega-button stop"
-              type="button"
-              disabled={faces.length === 0 || gameState !== "rolling"}
-              onClick={stopRoll}
-            >
-              STOP
-            </button>
-          </div>
-        </section>
-
-        {faces.length > 0 ? (
-          <section className="faces-zone" aria-label="参加者">
-            <div className="zone-title">
-              <span>参加者</span>
-              <button type="button" onClick={resetGame}>
-                全部消す
+        <div className="deck">
+          <section className="panel input-panel" aria-label="入力">
+            <div className="panel-head">
+              <span>INPUT</span>
+            </div>
+            <div className="panel-body">
+              <CameraPanel disabled={busy || gameState === "rolling"} onCapture={addPhoto} />
+              <input
+                ref={inputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(event) => onFileSelect(event.target.files)}
+              />
+              <button
+                className="ctl"
+                type="button"
+                disabled={busy || gameState === "rolling"}
+                onClick={() => inputRef.current?.click()}
+              >
+                <span className="ctl-key">IMG</span>
+                <span className="ctl-label">写真を選ぶ</span>
+              </button>
+              <button
+                className="ctl"
+                type="button"
+                disabled={busy || gameState === "rolling"}
+                onClick={startDemoMode}
+              >
+                <span className="ctl-key">DEMO</span>
+                <span className="ctl-label">デモで試す</span>
               </button>
             </div>
-            <div className="face-grid">
+          </section>
+
+          <section className="panel select-panel" aria-label="抽選">
+            <div className="panel-head">
+              <span>SELECTION</span>
+              <span className="panel-tag">{statusLabel}</span>
+            </div>
+            <div className="panel-body">
+              <div
+                className={`readout kind-${signalKind}`}
+                role="status"
+                aria-live="polite"
+                aria-label={`選択 ${readoutValue} / ${pad2(faces.length)}`}
+              >
+                <span className="readout-num">{readoutValue}</span>
+                <span className="readout-unit">/ {pad2(faces.length)}</span>
+              </div>
+
+              <div className="meters">
+                <div className="meter">
+                  <span>COUNT</span>
+                  <b>{pad2(faces.length)}</b>
+                </div>
+                <div className="meter">
+                  <span>DIE</span>
+                  <b>{diceLabel}</b>
+                </div>
+              </div>
+
+              <div className="run-row">
+                <button
+                  className="run"
+                  type="button"
+                  disabled={faces.length === 0 || busy || gameState === "rolling"}
+                  onClick={startRoll}
+                >
+                  RUN
+                </button>
+                <button
+                  className="halt"
+                  type="button"
+                  disabled={faces.length === 0 || gameState !== "rolling"}
+                  onClick={stopRoll}
+                >
+                  STOP
+                </button>
+              </div>
+
+              {winner ? (
+                <div className="locked">
+                  <ResultFace face={winner} />
+                  <div className="locked-meta">
+                    <span>LOCKED</span>
+                    <b>No.{pad2((winnerIndex ?? 0) + 1)}</b>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+
+        <div className="statusline" role="status">
+          <span className="statusline-key">STATUS</span>
+          <span className="statusline-text">{message}</span>
+        </div>
+
+        {faces.length > 0 ? (
+          <section className="panel participants" aria-label="参加者">
+            <div className="panel-head">
+              <span>PARTICIPANTS</span>
+              <span className="panel-tag">{pad2(faces.length)}</span>
+              <button className="clear" type="button" onClick={resetGame}>
+                CLEAR
+              </button>
+            </div>
+            <div className="grid">
               {faces.map((face, index) => (
-                <FaceChip
+                <FaceTile
                   key={face.id}
                   face={face}
                   index={index}
@@ -593,21 +705,11 @@ function App() {
           </section>
         ) : null}
 
-        {winner ? (
-          <section className="winner-card" aria-label="結果">
-            <div>
-              <p className="eyebrow">RESULT</p>
-              <h2>この人！</h2>
-              <p>もう一回遊ぶならSTARTを押してね。</p>
-            </div>
-            <ResultFace face={winner} />
-          </section>
-        ) : null}
-
-        <footer className="footer">
-          <span>local only / browser native / no server</span>
+        <footer className="foot">
+          <span className="dot" aria-hidden="true" />
+          on-device · no upload · browser-native
         </footer>
-      </section>
+      </div>
     </main>
   );
 }
