@@ -7,13 +7,16 @@ const FACES = ["front", "back", "right", "left", "top", "bottom"] as const;
 // 静止時の 3/4 ビュー。
 const REST_X = -24;
 const REST_Y = 22;
-// タンブルの 1 フレームあたりの回転量（deg）。速く・物理的に。
-const SPIN_X = 7;
-const SPIN_Y = 11;
+// タンブル速度（deg/秒）。フレームレートに依存しないよう時間ベースで回す。
+const SPIN_X_DPS = 420;
+const SPIN_Y_DPS = 660;
 // ロック時の減速時間（ms）。
 const LOCK_MS = 760;
 
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+const wrap360 = (v: number) => ((v % 360) + 360) % 360;
+// from から、base と 360 度合同になる最初の前方姿勢へ（さらに 1 回転足して着地感を出す）。
+const forwardRest = (from: number, base: number) => from + wrap360(base - from) + 360;
 
 // Design.md に合わせたマシン加工風モノクロの立方体。
 // RUN 中は requestAnimationFrame で多軸タンブル、STOP で静止姿勢へ減速してロックする。
@@ -40,23 +43,37 @@ export function Dice3D({ value, phase }: { value: string; phase: DicePhase }) {
 
     cancel();
 
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const snapToRest = () => {
+      cancel();
+      rot.current.x = REST_X;
+      rot.current.y = REST_Y;
+      apply();
+    };
 
-    if (phase === "rolling" && !reduce) {
-      const tick = () => {
-        rot.current.x += SPIN_X;
-        rot.current.y += SPIN_Y;
+    if (phase === "rolling" && !motion.matches) {
+      let prev: number | null = null;
+      const tick = (ts: number) => {
+        const dt = prev === null ? 0 : (ts - prev) / 1000;
+        prev = ts;
+        rot.current.x = wrap360(rot.current.x + SPIN_X_DPS * dt);
+        rot.current.y = wrap360(rot.current.y + SPIN_Y_DPS * dt);
         apply();
         rafRef.current = requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
-    } else if (phase === "result" && !reduce) {
-      // 現在の回転位置から、前面が正面に来る静止姿勢へ減速。最後にもう一回転足して着地感を出す。
-      const start = { x: rot.current.x, y: rot.current.y };
-      const target = {
-        x: Math.round((start.x - REST_X) / 360) * 360 + REST_X + 360,
-        y: Math.round((start.y - REST_Y) / 360) * 360 + REST_Y + 360,
+      // ロール中に reduced-motion へ切り替わったら即停止する。
+      motion.addEventListener("change", snapToRest);
+      return () => {
+        cancel();
+        motion.removeEventListener("change", snapToRest);
       };
+    }
+
+    if (phase === "result" && !motion.matches) {
+      // 現在の回転位置から、前面が正面に来る静止姿勢へ減速。
+      const start = { x: rot.current.x, y: rot.current.y };
+      const target = { x: forwardRest(start.x, REST_X), y: forwardRest(start.y, REST_Y) };
       let startTs: number | null = null;
       const tick = (ts: number) => {
         if (startTs === null) {
@@ -69,16 +86,19 @@ export function Dice3D({ value, phase }: { value: string; phase: DicePhase }) {
         apply();
         if (t < 1) {
           rafRef.current = requestAnimationFrame(tick);
+        } else {
+          rot.current.x = wrap360(rot.current.x);
+          rot.current.y = wrap360(rot.current.y);
+          apply();
+          rafRef.current = null;
         }
       };
       rafRef.current = requestAnimationFrame(tick);
-    } else {
-      // idle / reduced-motion: 静止姿勢へスナップ。
-      rot.current.x = REST_X;
-      rot.current.y = REST_Y;
-      apply();
+      return cancel;
     }
 
+    // idle / reduced-motion: 静止姿勢へスナップ。
+    snapToRest();
     return cancel;
   }, [phase]);
 
