@@ -277,7 +277,6 @@ p {
   border-radius: var(--radius);
   object-fit: cover;
   background: #000;
-  filter: grayscale(1) contrast(1.05);
 }
 
 .camera-actions {
