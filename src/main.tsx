@@ -1,6 +1,7 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { FaceDetector, FilesetResolver, type Detection } from "@mediapipe/tasks-vision";
+import { Dice3D, type DicePhase } from "./Dice3D";
 import "./styles.css";
 
 type FaceBox = {
@@ -319,6 +320,8 @@ function App() {
       : gameState === "result" && winnerIndex !== null
         ? pad2(winnerIndex + 1)
         : "00";
+  const dicePhase: DicePhase =
+    gameState === "rolling" ? "rolling" : gameState === "result" ? "result" : "idle";
 
   const loadDetector = useCallback(async () => {
     if (detectorRef.current) {
@@ -630,7 +633,7 @@ function App() {
                 aria-live="polite"
                 aria-label={`選択 ${readoutValue} / ${pad2(faces.length)}`}
               >
-                <span className="readout-num">{readoutValue}</span>
+                <Dice3D value={readoutValue} phase={dicePhase} />
                 <span className="readout-unit">/ {pad2(faces.length)}</span>
               </div>
 
