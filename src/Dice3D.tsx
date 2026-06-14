@@ -1,26 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { cropFaceToCanvas, type FaceCandidate } from "./face";
 
 export type DicePhase = "idle" | "rolling" | "result";
 
 const FACES = ["front", "back", "right", "left", "top", "bottom"] as const;
 const FACE_TEX = 128;
-
-// 1 つの面。顔があればクロップ写真、なければ数値を表示する。
-function DiceFace({ face, value }: { face: FaceCandidate | null; value: string }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    if (face && canvasRef.current) {
-      cropFaceToCanvas(canvasRef.current, face, FACE_TEX);
-    }
-  }, [face]);
-
-  if (face) {
-    return <canvas ref={canvasRef} className="dice-photo" />;
-  }
-  return <span className="dice-num">{value}</span>;
-}
 
 // 静止時の 3/4 ビュー。
 const REST_X = -24;
@@ -38,6 +22,7 @@ const forwardRest = (from: number, base: number) => from + wrap360(base - from) 
 
 // Design.md に合わせたマシン加工風モノクロの立方体。
 // RUN 中は requestAnimationFrame で多軸タンブル、STOP で静止姿勢へ減速してロックする。
+// 各面には抽選中/当選者の顔写真を貼る（モノクロ→ロックでフルカラー）。
 export function Dice3D({
   value,
   phase,
@@ -50,6 +35,28 @@ export function Dice3D({
   const cubeRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const rot = useRef({ x: REST_X, y: REST_Y });
+  const faceCanvases = useRef<Array<HTMLCanvasElement | null>>([]);
+  const offscreenRef = useRef<HTMLCanvasElement | null>(null);
+
+  // 顔は 1 回だけクロップし、その結果を 6 面へ安価にコピーする（毎 tick の再ダウンサンプルを避ける）。
+  // useLayoutEffect で描画前に確定させ、数値→写真のちらつきを防ぐ。
+  useLayoutEffect(() => {
+    if (!face) {
+      return;
+    }
+    const off = offscreenRef.current ?? (offscreenRef.current = document.createElement("canvas"));
+    if (!cropFaceToCanvas(off, face, FACE_TEX)) {
+      return;
+    }
+    for (const canvas of faceCanvases.current) {
+      if (!canvas) {
+        continue;
+      }
+      canvas.width = FACE_TEX;
+      canvas.height = FACE_TEX;
+      canvas.getContext("2d")?.drawImage(off, 0, 0);
+    }
+  }, [face]);
 
   useEffect(() => {
     const cube = cubeRef.current;
@@ -131,9 +138,18 @@ export function Dice3D({
   return (
     <div className={`dice3d phase-${phase}`} aria-hidden="true">
       <div className="dice-cube" ref={cubeRef}>
-        {FACES.map((side) => (
-          <span key={side} className={`dice-face f-${side}`}>
-            <DiceFace face={face} value={value} />
+        {FACES.map((side, i) => (
+          <span key={side} className={`dice-face f-${side} ${face ? "has-photo" : ""}`}>
+            {face ? (
+              <canvas
+                className="dice-photo"
+                ref={(el) => {
+                  faceCanvases.current[i] = el;
+                }}
+              />
+            ) : (
+              <span className="dice-num">{value}</span>
+            )}
           </span>
         ))}
       </div>
