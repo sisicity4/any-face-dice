@@ -139,7 +139,7 @@ export function Dice3D({
     <div className={`dice3d phase-${phase}`} aria-hidden="true">
       <div className="dice-cube" ref={cubeRef}>
         {FACES.map((side, i) => (
-          <span key={side} className={`dice-face f-${side} ${face ? "has-photo" : ""}`}>
+          <span key={side} className={`dice-face f-${side}`}>
             {face ? (
               <canvas
                 className="dice-photo"

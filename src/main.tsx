@@ -15,6 +15,17 @@ type PhotoEntry = {
 
 type DetectorState = "idle" | "loading" | "detecting" | "ready" | "error";
 type GameState = "waiting" | "ready" | "rolling" | "result";
+type SignalKind = "scan" | "err" | "run" | "lock" | "ready" | "idle";
+
+// シグナルの種別と表示ラベルは単一の真実から導出する（種別→ラベルの対応を一箇所に集約）。
+const SIGNAL_LABEL: Record<SignalKind, string> = {
+  scan: "SCAN",
+  err: "ERR",
+  run: "RUN",
+  lock: "LOCK",
+  ready: "READY",
+  idle: "IDLE",
+};
 
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
 const MODEL_URL =
@@ -59,12 +70,33 @@ function releasePhotoUrl(photo: PhotoEntry) {
   }
 }
 
+// getUserMedia の失敗理由を、利用者が次に取るべき行動が分かる文言へ変換する。
+function describeCameraError(error: unknown): string {
+  if (error instanceof DOMException) {
+    switch (error.name) {
+      case "NotAllowedError":
+      case "SecurityError":
+        return "カメラの使用が許可されませんでした。ブラウザの権限設定を確認してください。";
+      case "NotFoundError":
+      case "OverconstrainedError":
+        return "使用できるカメラが見つかりませんでした。写真を選んでください。";
+      case "NotReadableError":
+        return "カメラを他のアプリが使用中の可能性があります。閉じてからお試しください。";
+    }
+  }
+  return "カメラを起動できませんでした。許可設定を確認してください。";
+}
+
 function getScore(detection: Detection) {
   return detection.categories?.[0]?.score ?? 0;
 }
 
 function getDiceLabel(count: number) {
-  if (count <= 1) {
+  if (count <= 0) {
+    return "—";
+  }
+
+  if (count === 1) {
     return "D1";
   }
 
@@ -131,7 +163,7 @@ function ResultFace({ face }: { face: FaceCandidate }) {
     }
   }, [face]);
 
-  return <canvas ref={canvasRef} className="locked-face" aria-label="選ばれた顔" />;
+  return <canvas ref={canvasRef} className="locked-face" role="img" aria-label="選ばれた顔" />;
 }
 
 function CameraPanel({
@@ -183,9 +215,9 @@ function CameraPanel({
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-    } catch {
+    } catch (error) {
       stopCamera();
-      setError("カメラを起動できませんでした。許可設定を確認してください。");
+      setError(describeCameraError(error));
     }
   }, [stopCamera]);
 
@@ -210,6 +242,8 @@ function CameraPanel({
       (blob) => {
         if (blob) {
           onCapture(blob);
+        } else {
+          setError("撮影に失敗しました。もう一度試してください。");
         }
       },
       "image/jpeg",
@@ -250,6 +284,7 @@ function App() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const detectorRef = useRef<FaceDetector | null>(null);
   const detectorPromiseRef = useRef<Promise<FaceDetector> | null>(null);
+  const mountedRef = useRef(true);
   const spinTimerRef = useRef<number | null>(null);
   const photoIdRef = useRef(0);
   const opGenRef = useRef(0);
@@ -266,18 +301,7 @@ function App() {
   const diceLabel = getDiceLabel(faces.length);
   const busy = detectorState === "loading" || detectorState === "detecting";
 
-  const statusLabel = busy
-    ? "SCAN"
-    : detectorState === "error"
-      ? "ERR"
-      : gameState === "rolling"
-        ? "RUN"
-        : gameState === "result"
-          ? "LOCK"
-          : faces.length > 0
-            ? "READY"
-            : "IDLE";
-  const signalKind = busy
+  const signalKind: SignalKind = busy
     ? "scan"
     : detectorState === "error"
       ? "err"
@@ -288,6 +312,7 @@ function App() {
           : faces.length > 0
             ? "ready"
             : "idle";
+  const statusLabel = SIGNAL_LABEL[signalKind];
 
   const readoutValue =
     gameState === "rolling" && activeIndex !== null
@@ -320,6 +345,12 @@ function App() {
           minDetectionConfidence: 0.35,
           runningMode: "IMAGE",
         });
+        // 初期化がアンマウント後に完了した場合、cleanup は既に走り終えているため
+        // ここで閉じないとリソースが残る。キャッシュもしない。
+        if (!mountedRef.current) {
+          detector.close();
+          throw new Error("コンポーネントがアンマウントされました");
+        }
         detectorRef.current = detector;
         return detector;
       })();
@@ -350,7 +381,22 @@ function App() {
 
       try {
         const detector = await loadDetector();
-        const loadedPhoto = await loadImageFromBlob(blob);
+
+        let loadedPhoto: Awaited<ReturnType<typeof loadImageFromBlob>>;
+        try {
+          loadedPhoto = await loadImageFromBlob(blob);
+        } catch (error) {
+          // 画像のデコード失敗は利用者向けの具体メッセージをそのまま見せる
+          // （検出モジュールの不調と混同させない）。
+          if (isStale()) {
+            return;
+          }
+          setDetectorState("error");
+          setMessage(
+            error instanceof Error ? error.message : "画像を読み込めませんでした。",
+          );
+          return;
+        }
         loaded = loadedPhoto;
 
         // 検出中に CLEAR / デモ開始など別操作が走ったら、この結果は破棄する。
@@ -440,7 +486,8 @@ function App() {
   );
 
   const startRoll = useCallback(() => {
-    if (faces.length === 0 || gameState === "rolling") {
+    // 進行中タイマーの有無を真の排他条件にする（再描画ガードに依存しない）。
+    if (faces.length === 0 || spinTimerRef.current !== null) {
       return;
     }
 
@@ -453,7 +500,7 @@ function App() {
         return next % faces.length;
       });
     }, 70);
-  }, [faces.length, gameState]);
+  }, [faces.length]);
 
   const stopRoll = useCallback(() => {
     if (faces.length === 0) {
@@ -505,13 +552,16 @@ function App() {
 
     const nextPhotos: PhotoEntry[] = [];
     for (const photo of photosRef.current) {
-      const faces = photo.faces.filter((face) => face.id !== faceId);
-      if (faces.length === 0) {
+      // 外側の faces（全顔フラット配列）を隠さないよう別名にする。
+      const remaining = photo.faces.filter((face) => face.id !== faceId);
+      if (remaining.length === 0) {
         // 顔が無くなった写真は破棄（メモリ解放）。
         releasePhotoUrl(photo);
         continue;
       }
-      nextPhotos.push(faces.length === photo.faces.length ? photo : { ...photo, faces });
+      nextPhotos.push(
+        remaining.length === photo.faces.length ? photo : { ...photo, faces: remaining },
+      );
     }
 
     photosRef.current = nextPhotos;
@@ -527,7 +577,8 @@ function App() {
   }, []);
 
   const startDemoMode = useCallback(async () => {
-    opGenRef.current += 1;
+    const gen = (opGenRef.current += 1);
+    const isStale = () => opGenRef.current !== gen;
     if (spinTimerRef.current !== null) {
       window.clearInterval(spinTimerRef.current);
       spinTimerRef.current = null;
@@ -543,6 +594,10 @@ function App() {
 
     try {
       const image = await loadImageFromUrl(DEMO_IMAGE_URL);
+      // 読み込み中に CLEAR / 写真追加など別操作が走っていたら、この結果は破棄する。
+      if (isStale()) {
+        return;
+      }
       const imageId = "demo-party";
       const demoFaces = DEMO_FACE_BOXES.map((box, index): FaceCandidate => ({
         id: `${imageId}-face-${index}`,
@@ -566,6 +621,9 @@ function App() {
       setGameState("ready");
       setMessage("デモ 5 件 — RUN で実行");
     } catch {
+      if (isStale()) {
+        return;
+      }
       setDetectorState("error");
       setGameState("waiting");
       setMessage("デモ画像を読み込めませんでした");
@@ -576,8 +634,11 @@ function App() {
     photosRef.current = photos;
   }, [photos]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // StrictMode はマウント/アンマウントを二重実行する。再マウント時に true へ戻す。
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       if (spinTimerRef.current !== null) {
         window.clearInterval(spinTimerRef.current);
       }
@@ -585,9 +646,8 @@ function App() {
       detectorRef.current?.close();
       detectorRef.current = null;
       detectorPromiseRef.current = null;
-    },
-    [],
-  );
+    };
+  }, []);
 
   return (
     <main className={`app state-${gameState}`}>
@@ -615,6 +675,10 @@ function App() {
                 type="file"
                 accept="image/*"
                 multiple
+                // 視覚的に隠した実体。操作は「写真を選ぶ」ボタン経由なので、
+                // フォーカス順とスクリーンリーダーからは除外する。
+                aria-hidden="true"
+                tabIndex={-1}
                 onChange={(event) => onFileSelect(event.target.files)}
               />
               <button
@@ -646,8 +710,9 @@ function App() {
             <div className="panel-body">
               <div
                 className={`readout kind-${signalKind}`}
-                role="status"
-                aria-live="polite"
+                // ライブ通知は statusline に集約する。ここを role="status" にすると
+                // 抽選中 70ms ごとの数値更新が読み上げを埋め尽くすため、静的ラベルに留める。
+                role="img"
                 aria-label={`選択 ${readoutValue} / ${pad2(faces.length)}`}
               >
                 <Dice3D value={readoutValue} phase={dicePhase} face={diceFace} />

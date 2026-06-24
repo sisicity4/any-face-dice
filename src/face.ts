@@ -45,6 +45,11 @@ export function cropFaceToCanvas(
   canvas.width = size;
   canvas.height = size;
   context.clearRect(0, 0, size, size);
-  context.drawImage(image, x, y, right - x, bottom - y, 0, 0, size, size);
+  try {
+    // revoke 済み ObjectURL / 途中状態 / 極端な box 値で drawImage は例外を投げ得る。
+    context.drawImage(image, x, y, right - x, bottom - y, 0, 0, size, size);
+  } catch {
+    return false;
+  }
   return true;
 }
