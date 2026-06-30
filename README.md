@@ -11,7 +11,9 @@
 ![MediaPipe](https://img.shields.io/badge/MediaPipe-Tasks%20Vision-0097A7)
 ![On-device](https://img.shields.io/badge/Privacy-On--device%20only-2EAD33)
 
-<!-- TODO: ここに操作のGIF（写真選択→顔検出→ダイスで1人選出）を貼る。docs/assets/demo.gif -->
+![AnyFaceDice デモ](docs/assets/demo.gif)
+
+> デモ画像（5人）→ `RUN` で抽選 → `No.02` を当選者として `LOCKED`。すべてブラウザ内で完結します。
 
 ---
 
