@@ -1,88 +1,80 @@
-# AnyFaceDice
+# 🎲 AnyFaceDice
 
-顔を撮影、または写真を選択して、検出された顔からランダムに1人を選ぶブラウザゲームです。
+> 集合写真から「次やる人」をランダムに1人選ぶ、ブラウザだけで動く顔ルーレット。
+> **画像は端末内だけで処理され、サーバーには一切送信されません。**
 
-画像は端末内だけで処理され、サーバーには送信されません。
+**🔗 ライブデモ: https://any-face-dice.vercel.app/😃🎲/**
 
-## Repository Name and Public Address
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-Tasks%20Vision-0097A7)
+![On-device](https://img.shields.io/badge/Privacy-On--device%20only-2EAD33)
 
-GitHub repository name:
+<!-- TODO: ここに操作のGIF（写真選択→顔検出→ダイスで1人選出）を貼る。docs/assets/demo.gif -->
 
-```text
-any-face-dice
-```
+---
 
-Published GitHub Pages base path:
+## これは何？
 
-```text
-/😃🎲/
-```
+飲み会・パーティ・教室などで「じゃあ次は誰がやる？」を決めるための、軽いブラウザゲームです。
 
-この違いは意図的です。
+1. カメラで撮るか、手元の集合写真を選ぶ
+2. 写真の中の顔を自動で検出する
+3. ダイスを振るように、検出された顔から**ランダムに1人**を選ぶ
 
-理由:
+選ばれた顔は中央に大きくクロップ表示され、誰が当たったか一目で分かります。
 
-- npm / Vite / CLI / shellでトラブルが少ない
-- アプリ名 `AnyFaceDice` と対応が分かりやすい
-- 公開アドレスにはemoji identityを残せる
+## なぜ作ったか / こだわり
 
-このルールは [AGENTS.md](./AGENTS.md) にも記録しています。
+- **プライバシーを最優先**: 顔という最もセンシティブな画像を扱うので、**画像は端末から外に出さない**設計にしました。顔検出（MediaPipe）も推論モデルもブラウザ内（WASM）で完結し、アップロード用のサーバーを持ちません。
+- **インストール不要**: URLを開くだけ。アプリストアもアカウント登録もなしで、その場の全員がすぐ使えます。
+- **"公平にランダム"を体験として見せる**: ただ番号を出すのではなく、ダイス演出と顔クロップで「選ばれた感」を出しています。
 
-## Development
+## 技術構成
+
+| 領域 | 使用技術 | 役割 |
+| --- | --- | --- |
+| UI | React 19 / TypeScript | 状態管理・画面構成 |
+| ビルド | Vite 7 | 開発サーバー・本番ビルド |
+| 顔検出 | `@mediapipe/tasks-vision`（BlazeFace short-range, WASM） | 画像内の顔バウンディングボックス検出 |
+| 画像処理 | Canvas API | 顔を中心に正方形クロップ |
+| 配信 | Vercel / GitHub Pages | 静的ホスティング |
+
+### 処理の流れ
+
+1. ユーザーが写真を選ぶ／撮る（`File` → `HTMLImageElement`）
+2. MediaPipe FaceDetector が顔を検出（スコア・サイズで信頼度の低い顔を除外）
+3. ダイスを振ると、検出済みの顔候補から1つを抽選
+4. `cropFaceToCanvas` が当選した顔を正方形にクロップして表示
+
+すべて `fetch` で外部に画像を送らず、ブラウザのメモリ上だけで処理が完結します。
+
+## ローカルで動かす
 
 ```bash
 npm install
-npm run dev
+npm run dev      # 開発サーバー
+npm run build    # 本番ビルド
+npm run preview  # ビルド結果をローカル確認
 ```
 
-## Build
+## デプロイ
 
-```bash
-npm run build
-```
+| 配信先 | コマンド | 公開URL |
+| --- | --- | --- |
+| Vercel | `vercel deploy --prod` | `https://any-face-dice.vercel.app/😃🎲/` |
+| GitHub Pages | `npm run deploy`（`dist` を `gh-pages` ブランチへ） | `/😃🎲/` |
 
-## Preview Built Site
+## 補足: リポジトリ名と公開パスが違う理由
 
-```bash
-npm run build
-npm run preview
-```
+GitHub のリポジトリ名は `any-face-dice`、公開アドレスの base path は `/😃🎲/` です。これは意図的な設計です。
 
-## GitHub Pages
+- リポジトリ名は npm / Vite / CLI / shell でトラブルが起きない ASCII に保つ
+- 公開アドレスにはアプリの identity（emoji）を残す
 
-Vite baseは既定で `/😃🎲/` です。
+Vite の `base` は既定で `/😃🎲/`。ユーザーが明示的に変更を求めない限り、この base は変更しません（詳細は [AGENTS.md](./AGENTS.md)）。
 
 ```ts
 base: process.env.VITE_BASE_PATH ?? "/😃🎲/",
 ```
-
-リポジトリ名が `any-face-dice` でも、公開アドレスのbase pathは `/😃🎲/` のままです。ユーザーが明示的に公開アドレス変更を求めない限り、このbaseを変更しないでください。
-
-デプロイ直前の確認:
-
-```bash
-npm run build
-```
-
-実際に公開する時:
-
-```bash
-npm run deploy
-```
-
-`npm run deploy` は `dist` を `gh-pages` ブランチへ送ります。公開先のPages設定はGitHub側で `gh-pages` ブランチを参照するように設定してください。
-
-## Vercel
-
-公開アドレスにemoji identityを残すため、Vercelでも `/😃🎲/` パスで配信します。
-リポジトリ名は `any-face-dice` のままですが、公開パスは意図どおり `/😃🎲/` です。
-
-`vercel.json` のビルドコマンドで base を `/😃🎲/`、出力先を `dist/😃🎲/` に指定し、
-`dist` を配信ルートにすることで `https://<project>.vercel.app/😃🎲/` で開けます。
-ルート `/` は `/😃🎲/` へリダイレクトします。
-
-```bash
-vercel deploy --prod
-```
-
-公開URL: `https://any-face-dice.vercel.app/😃🎲/`
