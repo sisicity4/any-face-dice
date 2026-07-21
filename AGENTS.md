@@ -9,7 +9,7 @@ When working on this site, read this file before changing code, design, routes, 
 Do not change the distinction between the GitHub repository name and the published site address.
 
 - GitHub repository name: `any-face-dice`
-- Published GitHub Pages address/base path: `/😃🎲/`
+- Published Vercel address/base path: `/😃🎲/`
 
 This difference is intentional.
 
