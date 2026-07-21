@@ -41,7 +41,7 @@
 | ビルド | Vite 7 | 開発サーバー・本番ビルド |
 | 顔検出 | `@mediapipe/tasks-vision`（BlazeFace short-range, WASM） | 画像内の顔バウンディングボックス検出 |
 | 画像処理 | Canvas API | 顔を中心に正方形クロップ |
-| 配信 | Vercel / GitHub Pages | 静的ホスティング |
+| 配信 | Vercel | 静的ホスティング |
 
 ### 処理の流れ
 
@@ -66,11 +66,10 @@ npm run preview  # ビルド結果をローカル確認
 | 配信先 | コマンド | 公開URL |
 | --- | --- | --- |
 | Vercel | `vercel deploy --prod` | `https://any-face-dice.vercel.app/😃🎲/` |
-| GitHub Pages | `npm run deploy`（`dist` を `gh-pages` ブランチへ） | `/😃🎲/` |
 
 ## 補足: リポジトリ名と公開パスが違う理由
 
-GitHub のリポジトリ名は `any-face-dice`、公開アドレスの base path は `/😃🎲/` です。これは意図的な設計です。
+GitHub のリポジトリ名は `any-face-dice`、Vercel の公開アドレスの base path は `/😃🎲/` です。これは意図的な設計です。
 
 - リポジトリ名は npm / Vite / CLI / shell でトラブルが起きない ASCII に保つ
 - 公開アドレスにはアプリの identity（emoji）を残す
