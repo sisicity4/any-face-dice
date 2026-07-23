@@ -1,6 +1,6 @@
 {
   "framework": "vite",
-  "buildCommand": "VITE_BASE_PATH=/😃🎲/ VITE_OUT_DIR=dist/😃🎲 npm run build",
+  "buildCommand": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && VITE_BASE_PATH=/😃🎲/ VITE_OUT_DIR=dist/😃🎲 npm run build",
   "outputDirectory": "dist",
   "redirects": [{ "source": "/", "destination": "/😃🎲/", "permanent": false }]
 }
